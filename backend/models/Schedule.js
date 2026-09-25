@@ -17,6 +17,11 @@ const scheduleSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
+  setupMinutes: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   location: {
     type: String,
     required: true
