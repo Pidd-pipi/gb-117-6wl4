@@ -21,6 +21,11 @@ const scheduleSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  setupMinutes: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   expoId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Expo',

@@ -3,19 +3,31 @@ import { useParams, Link } from 'react-router-dom'
 import { scheduleAPI, expoAPI } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 
+const emptyForm = {
+  title: '',
+  description: '',
+  startTime: '',
+  endTime: '',
+  location: '',
+  setupMinutes: 0
+}
+
+const toLocalInput = (iso) => {
+  const d = new Date(iso)
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export default function SchedulePage() {
   const { id } = useParams()
   const { user } = useAuth()
   const [schedules, setSchedules] = useState([])
   const [expo, setExpo] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    startTime: '',
-    endTime: '',
-    location: ''
-  })
+  const [editingId, setEditingId] = useState(null)
+  const [form, setForm] = useState(emptyForm)
+  const [formError, setFormError] = useState('')
+  const [formConflicts, setFormConflicts] = useState([])
 
   useEffect(() => {
     loadSchedules()
@@ -40,15 +52,46 @@ export default function SchedulePage() {
     }
   }
 
+  const resetForm = () => {
+    setForm(emptyForm)
+    setEditingId(null)
+    setShowForm(false)
+    setFormError('')
+    setFormConflicts([])
+  }
+
+  const startEdit = (sched) => {
+    setForm({
+      title: sched.title,
+      description: sched.description || '',
+      startTime: toLocalInput(sched.startTime),
+      endTime: toLocalInput(sched.endTime),
+      location: sched.location,
+      setupMinutes: sched.setupMinutes || 0
+    })
+    setEditingId(sched._id)
+    setShowForm(true)
+    setFormError('')
+    setFormConflicts([])
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setFormError('')
+    setFormConflicts([])
+    const payload = { ...form, setupMinutes: Number(form.setupMinutes) || 0, expoId: id }
     try {
-      await scheduleAPI.create({ ...form, expoId: id })
-      setShowForm(false)
-      setForm({ title: '', description: '', startTime: '', endTime: '', location: '' })
+      if (editingId) {
+        await scheduleAPI.update(editingId, payload)
+      } else {
+        await scheduleAPI.create(payload)
+      }
+      resetForm()
       loadSchedules()
     } catch (err) {
-      alert('创建失败')
+      const data = err.response?.data
+      setFormError(data?.message || (editingId ? '保存失败' : '创建失败'))
+      setFormConflicts(data?.conflicts || [])
     }
   }
 
@@ -67,10 +110,10 @@ export default function SchedulePage() {
           <h1 className="text-3xl font-bold text-gray-800">活动时间表</h1>
           {user && (
             <button
-              onClick={() => setShowForm(!showForm)}
+              onClick={() => (showForm ? resetForm() : setShowForm(true))}
               className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700"
             >
-              + 添加活动
+              {showForm ? '收起' : '+ 添加活动'}
             </button>
           )}
         </div>
@@ -78,7 +121,24 @@ export default function SchedulePage() {
 
       {showForm && (
         <div className="bg-white rounded-xl shadow p-6 mb-8">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">添加新活动</h3>
+          <h3 className="text-xl font-bold text-gray-800 mb-4">{editingId ? '编辑活动' : '添加新活动'}</h3>
+
+          {formError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-4">
+              <p className="font-medium">{formError}</p>
+              {formConflicts.length > 0 && (
+                <ul className="mt-2 space-y-1 text-sm">
+                  {formConflicts.map(c => (
+                    <li key={c._id}>
+                      ⚠️ 「{c.title}」 {new Date(c.startTime).toLocaleString()} - {new Date(c.endTime).toLocaleString()}
+                      （{c.location}，布场 {c.setupMinutes} 分钟）
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-gray-700 mb-1">活动名称</label>
@@ -121,26 +181,39 @@ export default function SchedulePage() {
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-gray-700 mb-1">地点</label>
-              <input
-                type="text"
-                value={form.location}
-                onChange={e => setForm({ ...form, location: e.target.value })}
-                className="w-full px-4 py-2 border rounded-lg"
-                required
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-gray-700 mb-1">地点</label>
+                <input
+                  type="text"
+                  value={form.location}
+                  onChange={e => setForm({ ...form, location: e.target.value })}
+                  className="w-full px-4 py-2 border rounded-lg"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-gray-700 mb-1">布场时间（分钟）</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.setupMinutes}
+                  onChange={e => setForm({ ...form, setupMinutes: e.target.value })}
+                  className="w-full px-4 py-2 border rounded-lg"
+                  required
+                />
+              </div>
             </div>
             <div className="flex gap-3">
               <button
                 type="submit"
                 className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700"
               >
-                创建
+                {editingId ? '保存修改' : '创建'}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={resetForm}
                 className="bg-gray-300 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-400"
               >
                 取消
@@ -181,8 +254,20 @@ export default function SchedulePage() {
                             <span className="mr-2">📍</span>
                             {sched.location}
                           </span>
+                          <span className="flex items-center">
+                            <span className="mr-2">🛠️</span>
+                            布场 {sched.setupMinutes || 0} 分钟
+                          </span>
                         </div>
                       </div>
+                      {user && (
+                        <button
+                          onClick={() => startEdit(sched)}
+                          className="ml-4 text-purple-600 hover:text-purple-800 text-sm"
+                        >
+                          编辑
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
